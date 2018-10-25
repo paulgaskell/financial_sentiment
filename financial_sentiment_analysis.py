@@ -3,7 +3,7 @@ import csv
 from pylab import figure, show
 import numpy as np
 import datetime
-#import statsmodels.api as sm
+import statsmodels.api as sm
 import math
 import zipfile
 
@@ -13,17 +13,131 @@ FILELIST = {
     'lexisnexis': ['everything_else.csv - results-20160926-191305.csv.csv','AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv'],
     'webAll': ['SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv','SOCIALeverything_else.csv - results-20160927-183703.csv.csv']
     }
+    
+FFLIST = { 
+    '3 factor': 'F-F_Research_Data_Factors_daily.CSV',
+    '5 factor': 'F-F_Research_Data_5_Factors_2x3_daily.CSV'
+    }
 
+STOCKPRICELIST = {
+    'price': 'stock_data.csv',
+    'volume': 'stock_volumes.csv',
+    'volatility': 'volatility_processed.csv'
+    }
+    
+def date_range(min_date, max_date, weekdays=False):
+    dts = []
+    dte = min_date
+    while dte <= max_date:
+        if weekdays is False and dte.weekday() > 4:
+            pass
+        else:
+            dts.append(dte)
+        dte += datetime.timedelta(1)
+    
+    return dts
+    
+class Tseries:
+   
+    def __init__(self, idx):
+        self.tseries = { i: {} for i in idx }
+    
+    def add(self, iter, on_missing='add'):
+        
+        for idx, name, val in iter:            
+            if idx in self.tseries:
+                self.tseries[idx][name] = val
+
+    @property
+    def descriptives(self):
+        x = [0, 10000]
+        names = None
+        for dte, v in self.tseries.items():
+            T = len(v)
+            if T > x[0]: 
+                x[0] = T
+                names = v.keys()
+            if T < x[1]:
+                x[1] = T
+                
+        return x, len(self.tseries), names
+    
+    @property 
+    def last_vals(self):
+        cols = self.descriptives[2]
+        last_vals = { c: None for c in cols }
+        for dte in self.tseries:
+            for c in cols:
+                x = self.tseries[dte].get(c)
+                if x is None or x == 0:
+                    continue
+                    
+                last_vals[c] = dte
+        return last_vals   
+    
+    def dummy_vars(self, cond, name):
+        for dte in self.tseries.keys():
+            if cond(dte):
+                self.tseries[dte][name] = 1
+            else:
+                self.tseries[dte][name] = 0
+    
+    def make_return_matrix(self):
+        """
+        Generates a dts x cols matrix and associated labels
+        """
+    
+        dts = sorted(self.tseries.keys())
+        cols = self.descriptives[2]
+        
+        matrix = np.zeros((len(dts), len(cols)))
+        for n, dte in enumerate(dts):
+            for k, col in enumerate(cols):
+                matrix[n][k] = self.tseries[dte][col]
+        
+        self.matrix = matrix
+        self.dates = dts
+        self.labels = list(cols)
+    
+    def remove_null(self):
+        ts = {}
+        for dte in self.tseries:
+            if len(self.tseries[dte]) > 0:
+                ts[dte] = self.tseries[dte]
+        self.tseries = ts
+    
+    def pad_missing(self):
+        cols = self.descriptives[2]
+        for dte in self.tseries:
+            for c in cols:
+                if c not in self.tseries[dte]:
+                    self.tseries[dte][c] = 0
+    
+    def matrix_selector(self, label_selection):
+        selection = []
+        for i in label_selection:
+            for n, col in enumerate(self.labels):
+                if col == i:
+                    selection.append(self.matrix.T[n])
+        
+        selection = np.array(selection).T
+        return selection 
+        
+    
+         
 class LMNDataReader:
-
+    
+    def __init__(self, url):
+        self.url = url
+    
     def _date_converter(self, x):
         x = x.split()[0]
         
-        if b'-' in x:
-            x = list(map(int, x.split(b'-')))
+        if '-' in x:
+            x = list(map(int, x.split('-')))
             x = datetime.date(x[0], x[1], x[2])
-        elif b'/' in x:
-            x = list(map(int, x.split(b'/')))
+        elif '/' in x:
+            x = list(map(int, x.split('/')))
             x = datetime.date(x[2], x[0], x[1])
         else:
             print('error trying to parse date: {}'.format(x))
@@ -37,108 +151,139 @@ class LMNDataReader:
             print('error trying to parse nt: {}'.format(x))
         
         return x
-    
-    def __init__(self):
+        
+    def nt_data(self):
+        """
+        get data into a dict like
+            data[source content][ticker] = [date, LMN words]
+        """
+            
         data = {}
-        zf = zipfile.ZipFile('data_for_financial_sentiment_paper.zip')
+        zf = zipfile.ZipFile(self.url)
         for k, names in FILELIST.items():
             data[k] = {}
             for fname in names:
                 fcontent = zf.open(fname).readlines()
                 for line in fcontent:
-                    line = line[:-1].split(b',')
+                    line = line.decode("utf-8")[:-1].split(',')
+
                     dte = self._date_converter(line[1])
                     nt = self._nt_converter(line[2])
                     
-                    if line[0] not in data[k]:
-                        data[k][line[0]] = []
-                        
-                    data[k][line[0]].append([dte, nt])
-    
-    
-
-        
-                
+                    yield dte, "{}_{}".format(k, line[0]), nt
                     
+class FFDataReader:
+    
+    def __init__(self, url):    
+        self.url = url
+    
+    def _ff_date_converter(self, x):
+        try: 
+            x = datetime.date(int(x[:4]), int(x[4:6]), int(x[6:]))
+        except Exception as E:
+            print(repr(E))
+        
+        return x
+        
+    def FF_data(self, greater_than=20140000):
+        """
+        get data into a dict like
+            data[ff model] = [date, factors...]
+        """
+    
+        zf = zipfile.ZipFile(self.url)
+         
+        for k, fname in FFLIST.items():
+            fcontent = zf.open(fname).readlines()
+            for line in fcontent:
+                line = line[:-2].split(b',')
+                try:
+                    assert int(line[0]) > greater_than
+                except Exception as E:
+                    continue
                 
-l = LMNDataReader()
+                dte = self._ff_date_converter(line[0])
+                if k == '3 factor':
+                    for n in range(1, 4):
+                        yield dte, '{} f={}'.format(k, n), float(line[n])
+                elif k == '5 factor':
+                    for n in range(1, 6):
+                        yield dte, '{} f={}'.format(k, n), float(line[n])
+
+class StockPriceDataFeeder:
+    def __init__(self, url):
+        self.url = url
+        
+    def _date_converter(self, x):
+        x = x.split(b'/')
+        x = datetime.date(int(x[2]), int(x[1]), int(x[0]))
+        return x
             
+    def sp_data(self):
+        zf = zipfile.ZipFile(self.url)
+         
+        for k, fname in STOCKPRICELIST.items(): 
+            fcontent = zf.open(fname).readlines()
+            tickers = fcontent[0][:-2].split(b',')[1:]
+            tickers = [i.decode("utf-8") for i in tickers]
+            for line in fcontent:
+                line = line[:-2].split(b',')
+                try:
+                    dte = self._date_converter(line[0])
+                except Exception as E:
+                    print(repr(E))
+                    continue
+                    
+                for n, ticker in enumerate(tickers):
+                    yield dte, "{}_{}".format(k, ticker), float(line[n+1])                    
+
+def matrix_difference(X, n):
+    pass
+
+def matrix_difference(X, n):
+    for i in range(1, X.shape[0]):
+        X[i][n] = X[i][n]-X[i-1][n]
+    X[0][n] = 0
+    return X            
+
+if __name__ == '__main__':  
+    min_date = datetime.date(2014, 1, 1)
+    max_date = datetime.date(2015, 8, 23)
+    url = 'data_for_financial_sentiment_paper.zip'
+    
+    
+    ts = Tseries(date_range(min_date, max_date))
+    
+    #trading days first so we can exclude non trading days 
+    ts.add(StockPriceDataFeeder(url).sp_data())
+    ts.remove_null()
+    
+    ts.add(LMNDataReader(url).nt_data())
+    ts.add(FFDataReader(url).FF_data())
+     
+    ts.remove_null()
+    ts.pad_missing()       
+    ts.dummy_vars(lambda x: x.weekday()==0, 'NWD')
+    ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
+    ts.dummy_vars(lambda x: x.month==1, 'january')
+    
+    ts.make_return_matrix()
+            
+    X = ts.matrix_selector(['price_AAPL', 'webAll_AAPL', 'NWD', 'friday'])
+    y = ts.matrix_selector(['price_AAPL'])
+    
+    X = matrix_difference(X, 0)[:-1]
+    y = matrix_difference(y, 0)[1:]
+    
+    print(np.mean(X, 0))
+    
+    print(X.shape, y.shape)
+    res = sm.OLS(y, X).fit()
+    
+    print(res.params, res.pvalues, res.rsquared_adj)
+    
+    
 """
-        
-        with open('../Downloads/websites_AAPL_IBM_MSFT_IBM.csv', 'rb') as inp: # this is web 1
-        #with open('../Downloads/just_social_media_AAPL_IBM_MSFT_VZ.csv', 'rb') as inp: # this is web 2
-        #with open('../Downloads/everything_else.csv - results-20160926-191305.csv.csv', 'rb') as inp: # this is lexis nexis
-        #with open('../Downloads/SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv', 'rb') as inp:
-            for i in csv.reader(inp):
-                dte = i[1]
-                stock = i[0]
-                i[0] = dte
-                i[1] = stock
-                
-                #try:
-                #    i0 = i[0].split()[0]
-                #    i0 = i0.split('/')
-                #    i0 = map(int, i0)
-                #    i[0] = datetime.date(i0[2], i0[0], i0[1])
-                try:
-                    i0 = i[0].split()[0]
-                    i0 = i0.split('-')
-                    i0 = map(int, i0)
-                    i[0] = datetime.date(i0[0], i0[1], i0[2])
-                
-                except Exception as E:
-                    print repr(E)
-                    continue
-
-                if i[0] not in data: data[i[0]] = {}
-                data[i[0]][i[1]] = i[2]
-                
-        with open('../Downloads/websites_everything_else.csv', 'rb') as inp: # this is web 1
-        #with open('../Downloads/just_social_media_everything_else.csv', 'rb') as inp: # this is web 2
-        #with open('../Downloads/AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv', 'rb') as inp: # this is lexis nexis
-        #with open('../Downloads/SOCIALeverything_else.csv - results-20160927-183703.csv.csv', 'rb') as inp:
-
-            for i in csv.reader(inp):
-                dte = i[1]
-                stock = i[0]
-                i[0] = dte
-                i[1] = stock
-                
-                #try:
-                #    i0 = i[0].split()[0]
-                #    i0 = i0.split('/')
-                #    i0 = map(int, i0)
-                #    i[0] = datetime.date(i0[2], i0[0], i0[1])
-                try:
-                    i0 = i[0].split()[0]
-                    i0 = i0.split('-')
-                    i0 = map(int, i0)
-                    i[0] = datetime.date(i0[0], i0[1], i0[2])
-                except Exception as E:
-                    print repr(E)
-                    continue
-
-                if i[0] not in data: data[i[0]] = {}
-                data[i[0]][i[1]] = i[2]
-
-        stocks = {}
-        for n, i in data.items():
-            for stock in i.keys():
-                if stock not in stocks: stocks[stock] = None
-        stocks = stocks.keys()
-        
-        dts = sorted(data.keys())
-        lmn = []
-        for dte in dts:
-            row = []
-            for stock in stocks:
-                if stock in data[dte]: row.append(data[dte][stock])
-                else: row.append(0)
-            lmn.append(row)
-
-        print stocks
-
-        return [stocks, dts, lmn]
 
 def zs(x): 
     return (np.array(x)-np.mean(x))/np.std(x)
@@ -147,61 +292,7 @@ def pprintres(res):
     for n, i in enumerate(res.params):
         print n, i, res.pvalues[n]
     print res.rsquared_adj
-
-def get_ff_factors(dts, which):
-    if which == 0: s = 'F-F_Research_Data_Factors_daily_CSV/F-F_Research_Data_Factors_daily.CSV'
-    else: s = 'F-F_Research_Data_5_Factors_2x3_daily_CSV/F-F_Research_Data_5_Factors_2x3_daily.CSV'
-    
-    dts2, data = [[],[]]
-    with open('../Downloads/'+s, 'rb') as inp:
-        for line in csv.reader(inp):
-            try: dte = datetime.date(int(line[0][:4]), int(line[0][4:6]), int(line[0][6:]))
-            except Exception as E:
-                print repr(E)
-                print line
-                
-                continue
-                                     
-            if dte in dts:
-                dts2.append(dte)
-                if which == 0: data.append(map(float, line[1:4]))
-                else:
-                    data.append(map(float, line[1:6]))
-    return [dts2, np.array(data)/100]
-                
-
-
-        
-    
-def get_stock_price_data2():
-    data = []
-    with open('../Downloads/stock_data.csv', 'rb') as inp:
-    #with open('../Downloads/stock_volumes.csv', 'rb') as inp:
-    #with open('../Downloads/volatility_processed.csv', 'rb') as inp:
-        for line in csv.reader(inp):
-            data.append(line)
-
-
-    tickers = data[0][1:]
-    data = np.array(data[1:]).T
-    dts = data[0][1:]
-    dts_ = []
-    for n, dte in enumerate(dts):
-        try:
-            dte = dte.split('/')
-            dte = map(int, dte)
-            dte = datetime.date(dte[2], dte[1], dte[0])
-            dts_.append(dte)
-        except Exception as E:
-            print repr(E)
-
-    for i in data: print i
-    
-    prices = np.array(data[1:], dtype=float)
-    prices = prices.T
-    return [tickers, dts_, prices]
-    
-
+            
 def get_crsp_data():
     with open('../Downloads/CRSP value-eighted index return.xlsx - WRDS.csv', 'rb') as inp:
         data = {}
@@ -217,55 +308,6 @@ def get_crsp_data():
                  
         return data
     
-def map_data_together(a, b, name):
-    for n, dte in enumerate(b[0]):
-        try: a[dte][name] = b[1][n]
-        except Exception as E:
-            print 'CANT FINE DATE', dte, repr(E)
-    
-    return a
-
-def prep_for_analysis(data, tickers_price, tickers_lmn):
-    ticker_mapping = []
-    for t in tickers_price:
-        ticker_mapping.append(tickers_lmn.index(t))
-
-    for n, i in enumerate(ticker_mapping):
-        print tickers_price[n], tickers_lmn[i]
-        
-    dts = sorted(data.keys())
-    dts_ = []
-    price, lmn, crsp = [[],[],[]]
-    for dte in dts:
-        if len(data[dte].keys()) != 3: continue
-        prow = []
-        lrow = []
-        print len(data[dte]['r']), len(data[dte]['lmn']), data[dte]['lmn'], data[dte]['r']
-        for n, i in enumerate(ticker_mapping):
-            prow.append(data[dte]['r'][n])
-            lrow.append(data[dte]['lmn'][i])
-
-        price.append(prow)
-        lmn.append(lrow)
-        crsp.append(data[dte]['crsp'])
-        dts_.append(dte)
-    dts = dts_
-        
-    price = np.array(price, dtype=float)
-    lmn = np.array(lmn, dtype=float)
-    crsp = np.array(crsp, dtype=float)
-    january = []
-    friday = []
-    NWK = []
-    for dte in dts:
-        if dte.month == 1: january.append(1)
-        else: january.append(0)
-        if dte.weekday() == 4: friday.append(1)
-        else: friday.append(0)
-        if dte.weekday() == 0: NWK.append(1)
-        else: NWK.append(0)
-        
-    return [dts, price, lmn, crsp, january, friday, NWK]
 
 
 def var(x, y, tau, january, friday=None, single=False):
