@@ -3,16 +3,150 @@ import csv
 from pylab import figure, show
 import numpy as np
 import datetime
-import statsmodels.api as sm
+#import statsmodels.api as sm
 import math
+import zipfile
 
-def zs(x): return (np.array(x)-np.mean(x))/np.std(x)
+FILELIST = {
+    'web1': ['websites_AAPL_IBM_MSFT_IBM.csv','websites_everything_else.csv'],
+    'web2': ['just_social_media_AAPL_IBM_MSFT_VZ.csv','just_social_media_everything_else.csv'],
+    'lexisnexis': ['everything_else.csv - results-20160926-191305.csv.csv','AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv'],
+    'webAll': ['SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv','SOCIALeverything_else.csv - results-20160927-183703.csv.csv']
+    }
+
+class LMNDataReader:
+
+    def _date_converter(self, x):
+        x = x.split()[0]
+        
+        if b'-' in x:
+            x = list(map(int, x.split(b'-')))
+            x = datetime.date(x[0], x[1], x[2])
+        elif b'/' in x:
+            x = list(map(int, x.split(b'/')))
+            x = datetime.date(x[2], x[0], x[1])
+        else:
+            print('error trying to parse date: {}'.format(x))
+        
+        return x
+    
+    def _nt_converter(self, x):
+        try:
+            x = int(x)
+        except:
+            print('error trying to parse nt: {}'.format(x))
+        
+        return x
+    
+    def __init__(self):
+        data = {}
+        zf = zipfile.ZipFile('data_for_financial_sentiment_paper.zip')
+        for k, names in FILELIST.items():
+            data[k] = {}
+            for fname in names:
+                fcontent = zf.open(fname).readlines()
+                for line in fcontent:
+                    line = line[:-1].split(b',')
+                    dte = self._date_converter(line[1])
+                    nt = self._nt_converter(line[2])
+                    
+                    if line[0] not in data[k]:
+                        data[k][line[0]] = []
+                        
+                    data[k][line[0]].append([dte, nt])
+    
+    
+
+        
+                
+                    
+                
+l = LMNDataReader()
+            
+"""
+        
+        with open('../Downloads/websites_AAPL_IBM_MSFT_IBM.csv', 'rb') as inp: # this is web 1
+        #with open('../Downloads/just_social_media_AAPL_IBM_MSFT_VZ.csv', 'rb') as inp: # this is web 2
+        #with open('../Downloads/everything_else.csv - results-20160926-191305.csv.csv', 'rb') as inp: # this is lexis nexis
+        #with open('../Downloads/SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv', 'rb') as inp:
+            for i in csv.reader(inp):
+                dte = i[1]
+                stock = i[0]
+                i[0] = dte
+                i[1] = stock
+                
+                #try:
+                #    i0 = i[0].split()[0]
+                #    i0 = i0.split('/')
+                #    i0 = map(int, i0)
+                #    i[0] = datetime.date(i0[2], i0[0], i0[1])
+                try:
+                    i0 = i[0].split()[0]
+                    i0 = i0.split('-')
+                    i0 = map(int, i0)
+                    i[0] = datetime.date(i0[0], i0[1], i0[2])
+                
+                except Exception as E:
+                    print repr(E)
+                    continue
+
+                if i[0] not in data: data[i[0]] = {}
+                data[i[0]][i[1]] = i[2]
+                
+        with open('../Downloads/websites_everything_else.csv', 'rb') as inp: # this is web 1
+        #with open('../Downloads/just_social_media_everything_else.csv', 'rb') as inp: # this is web 2
+        #with open('../Downloads/AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv', 'rb') as inp: # this is lexis nexis
+        #with open('../Downloads/SOCIALeverything_else.csv - results-20160927-183703.csv.csv', 'rb') as inp:
+
+            for i in csv.reader(inp):
+                dte = i[1]
+                stock = i[0]
+                i[0] = dte
+                i[1] = stock
+                
+                #try:
+                #    i0 = i[0].split()[0]
+                #    i0 = i0.split('/')
+                #    i0 = map(int, i0)
+                #    i[0] = datetime.date(i0[2], i0[0], i0[1])
+                try:
+                    i0 = i[0].split()[0]
+                    i0 = i0.split('-')
+                    i0 = map(int, i0)
+                    i[0] = datetime.date(i0[0], i0[1], i0[2])
+                except Exception as E:
+                    print repr(E)
+                    continue
+
+                if i[0] not in data: data[i[0]] = {}
+                data[i[0]][i[1]] = i[2]
+
+        stocks = {}
+        for n, i in data.items():
+            for stock in i.keys():
+                if stock not in stocks: stocks[stock] = None
+        stocks = stocks.keys()
+        
+        dts = sorted(data.keys())
+        lmn = []
+        for dte in dts:
+            row = []
+            for stock in stocks:
+                if stock in data[dte]: row.append(data[dte][stock])
+                else: row.append(0)
+            lmn.append(row)
+
+        print stocks
+
+        return [stocks, dts, lmn]
+
+def zs(x): 
+    return (np.array(x)-np.mean(x))/np.std(x)
 
 def pprintres(res):
     for n, i in enumerate(res.params):
         print n, i, res.pvalues[n]
     print res.rsquared_adj
-
 
 def get_ff_factors(dts, which):
     if which == 0: s = 'F-F_Research_Data_Factors_daily_CSV/F-F_Research_Data_Factors_daily.CSV'
@@ -36,82 +170,7 @@ def get_ff_factors(dts, which):
     return [dts2, np.array(data)/100]
                 
 
-def get_lmn_data():
-    data = {}
-    with open('../Downloads/websites_AAPL_IBM_MSFT_IBM.csv', 'rb') as inp: # this is web 1
-    #with open('../Downloads/just_social_media_AAPL_IBM_MSFT_VZ.csv', 'rb') as inp: # this is web 2
-    #with open('../Downloads/everything_else.csv - results-20160926-191305.csv.csv', 'rb') as inp: # this is lexis nexis
-    #with open('../Downloads/SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv', 'rb') as inp:
-        for i in csv.reader(inp):
-            dte = i[1]
-            stock = i[0]
-            i[0] = dte
-            i[1] = stock
-            
-            #try:
-            #    i0 = i[0].split()[0]
-            #    i0 = i0.split('/')
-            #    i0 = map(int, i0)
-            #    i[0] = datetime.date(i0[2], i0[0], i0[1])
-            try:
-                i0 = i[0].split()[0]
-                i0 = i0.split('-')
-                i0 = map(int, i0)
-                i[0] = datetime.date(i0[0], i0[1], i0[2])
-            
-            except Exception as E:
-                print repr(E)
-                continue
 
-            if i[0] not in data: data[i[0]] = {}
-            data[i[0]][i[1]] = i[2]
-            
-    with open('../Downloads/websites_everything_else.csv', 'rb') as inp: # this is web 1
-    #with open('../Downloads/just_social_media_everything_else.csv', 'rb') as inp: # this is web 2
-    #with open('../Downloads/AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv', 'rb') as inp: # this is lexis nexis
-    #with open('../Downloads/SOCIALeverything_else.csv - results-20160927-183703.csv.csv', 'rb') as inp:
-
-        for i in csv.reader(inp):
-            dte = i[1]
-            stock = i[0]
-            i[0] = dte
-            i[1] = stock
-            
-            #try:
-            #    i0 = i[0].split()[0]
-            #    i0 = i0.split('/')
-            #    i0 = map(int, i0)
-            #    i[0] = datetime.date(i0[2], i0[0], i0[1])
-            try:
-                i0 = i[0].split()[0]
-                i0 = i0.split('-')
-                i0 = map(int, i0)
-                i[0] = datetime.date(i0[0], i0[1], i0[2])
-            except Exception as E:
-                print repr(E)
-                continue
-
-            if i[0] not in data: data[i[0]] = {}
-            data[i[0]][i[1]] = i[2]
-
-    stocks = {}
-    for n, i in data.items():
-        for stock in i.keys():
-            if stock not in stocks: stocks[stock] = None
-    stocks = stocks.keys()
-    
-    dts = sorted(data.keys())
-    lmn = []
-    for dte in dts:
-        row = []
-        for stock in stocks:
-            if stock in data[dte]: row.append(data[dte][stock])
-            else: row.append(0)
-        lmn.append(row)
-
-    print stocks
-
-    return [stocks, dts, lmn]
         
     
 def get_stock_price_data2():
@@ -432,6 +491,7 @@ print res.summary()
 
 
 
+"""
 
 
 
