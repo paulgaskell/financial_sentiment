@@ -1,8 +1,16 @@
 
-from financial_sentiment_analysis import MatrixOperations 
+from financial_sentiment_analysis import MatrixOperations, LMNDataReader 
 import numpy as np
+import datetime 
 
 
+
+def test_LMNDataReader():
+    dr = LMNDataReader('data_for_financial_sentiment_paper.zip')
+    for i in dr.nt_data():
+        assert type(i[0]) == datetime.date and type(i[1]) == str and type(i[2]) == float 
+        
+test_LMNDataReader()
 
 def test_diff():
     """

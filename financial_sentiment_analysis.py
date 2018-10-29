@@ -5,13 +5,22 @@ import datetime
 import statsmodels.api as sm
 import zipfile
 
+"""
 FILELIST = {
     'web1': ['websites_AAPL_IBM_MSFT_IBM.csv','websites_everything_else.csv'],
     'web2': ['just_social_media_AAPL_IBM_MSFT_VZ.csv','just_social_media_everything_else.csv'],
     'lexisnexis': ['everything_else.csv - results-20160926-191305.csv.csv','AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv'],
     'webAll': ['SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv','SOCIALeverything_else.csv - results-20160927-183703.csv.csv']
     }
-    
+"""
+
+FILELIST = {
+    'web': 'web',
+    'web1': 'web1',
+    'web2': 'web2',
+    'lexisnexis': 'lexisnexis'
+}
+
 FFLIST = { 
     '3 factor': 'F-F_Research_Data_Factors_daily.CSV',
     '5 factor': 'F-F_Research_Data_5_Factors_2x3_daily.CSV'
@@ -120,9 +129,7 @@ class Tseries:
         
         selection = np.array(selection).T
         return selection 
-        
-    
-         
+                
 class LMNDataReader:
     
     def __init__(self, url):
@@ -142,9 +149,9 @@ class LMNDataReader:
         
         return x
     
-    def _nt_converter(self, x):
+    def _nt_converter(self, T, x):
         try:
-            x = int(x)
+            x = 100*(float(x)/float(T))
         except:
             print('error trying to parse nt: {}'.format(x))
         
@@ -158,18 +165,18 @@ class LMNDataReader:
             
         data = {}
         zf = zipfile.ZipFile(self.url)
-        for k, names in FILELIST.items():
+        for k, fname in FILELIST.items():
             data[k] = {}
-            for fname in names:
-                fcontent = zf.open(fname).readlines()
-                for line in fcontent:
-                    line = line.decode("utf-8")[:-1].split(',')
+            fcontent = zf.open(fname).readlines()
+            for line in fcontent[1:]:
+                line = line.decode("utf-8")[:-1].split(',')
 
-                    dte = self._date_converter(line[1])
-                    nt = self._nt_converter(line[2])
-                    
-                    yield dte, "{}_{}".format(k, line[0]), nt
-                    
+                dte = self._date_converter(line[1])
+                nt = self._nt_converter(line[2], line[3])
+                yield dte, "{}_{}".format(k, line[0]), nt
+                
+
+                 
 class FFDataReader:
     
     def __init__(self, url):    
@@ -211,7 +218,7 @@ class FFDataReader:
 class StockPriceDataFeeder:
     def __init__(self, url):
         self.url = url
-        
+       
     def _date_converter(self, x):
         x = x.split(b'/')
         x = datetime.date(int(x[2]), int(x[1]), int(x[0]))
@@ -249,6 +256,7 @@ class MatrixOperations:
         return X 
 
     def var(self, X, n, lags):
+        
         X = X.T
         X_ = np.zeros((X.shape[0]+len(lags), X.shape[1]))
         X_[:X.shape[0]] = X
@@ -271,8 +279,7 @@ class MatrixOperations:
 def make_var(ticker, lags):
     mo = MatrixOperations()
     X = ts.matrix_selector(['price_{}'.format(ticker),
-                                'lexisnexis_{}'.format(ticker),
-                                'NWD', 'friday', 'january'
+                                'lexisnexis_{}'.format(ticker)
                                 ])
     y = ts.matrix_selector(['price_{}'.format(ticker)])
     
@@ -321,12 +328,30 @@ if __name__ == '__main__':
     ts.dummy_vars(lambda x: x.weekday()==0, 'NWD')
     ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
     ts.dummy_vars(lambda x: x.month==1, 'january')
-    
     ts.make_return_matrix()
     
+    all_tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]
+    for ticker in all_tickers:
+        x = ts.matrix_selector(['lexisnexis_{}'.format(ticker)])
+        y = ts.matrix_selector(['price_{}'.format(ticker)])
+        y = np.diff(y.T[0]).T
+        x = x.T[0][1:].T
+        print(ticker)
+        
+        print(sm.OLS(y, sm.tools.add_constant(x)).fit().summary())
+        
+        fig = figure()
+        axs = [fig.add_subplot(311), fig.add_subplot(312),fig.add_subplot(313)]
+        axs[0].plot(x)
+        axs[1].plot(y)
+        axs[2].scatter(x, y)
+        show()
+        
+    
+    
     # do regressions
-    all_tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]    
-    pannal_var(all_tickers, 5)
+    #    
+    #pannal_var(['AAPL'], 5)
     
     
 # regression accross all stocks
