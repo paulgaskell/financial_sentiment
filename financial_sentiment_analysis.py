@@ -1,10 +1,8 @@
 
-import csv
 from pylab import figure, show
 import numpy as np
 import datetime
 import statsmodels.api as sm
-import math
 import zipfile
 
 FILELIST = {
@@ -237,21 +235,78 @@ class StockPriceDataFeeder:
                 for n, ticker in enumerate(tickers):
                     yield dte, "{}_{}".format(k, ticker), float(line[n+1])                    
 
-def matrix_difference(X, n):
-    pass
+class MatrixOperations:
+    def zscore(self, X):
+        mu = np.mean(X, 0)
+        sig = np.std(X, 0)
+        X = (X-mu)/sig
+        return X
+        
+    def diff(self, X, n):
+        X = X.T
+        X[n] = np.append(0, np.diff(X[n]))
+        X = X.T
+        return X 
 
-def matrix_difference(X, n):
-    for i in range(1, X.shape[0]):
-        X[i][n] = X[i][n]-X[i-1][n]
-    X[0][n] = 0
-    return X            
+    def var(self, X, n, lags):
+        X = X.T
+        X_ = np.zeros((X.shape[0]+len(lags), X.shape[1]))
+        X_[:X.shape[0]] = X
+        c = X.shape[0]
+        for lag in lags:
+            laggedX = X[n]
+            laggedX = laggedX[:-lag]
+            laggedX = np.append(np.zeros(lag), laggedX)
+            X_[c] = laggedX
+            c += 1
+        X = X_.T
+        return X
+        
+    def append(self, X1, X2):
+        X = np.zeros((X1.shape[0]+X2.shape[0], X1.shape[1]))
+        X[:X1.shape[0]] = X1
+        X[X1.shape[0]:] = X2
+        return X
 
+def make_var(ticker, lags):
+    mo = MatrixOperations()
+    X = ts.matrix_selector(['price_{}'.format(ticker),
+                                'lexisnexis_{}'.format(ticker),
+                                'NWD', 'friday', 'january'
+                                ])
+    y = ts.matrix_selector(['price_{}'.format(ticker)])
+    
+    X = mo.diff(X, 0)[:-1]
+    y = mo.diff(y, 0)[1:]
+    X = mo.var(X, 1, range(1, lags))
+    X = mo.var(X, 0, range(1, lags))
+    # remove 'padded' var valuess
+    X = X[lags:]
+    y = y[lags:]
+    X = mo.zscore(X)
+    y = mo.zscore(y)
+    return X, y
+
+def pannal_var(tickers, lags):
+    mo = MatrixOperations()
+    X, y = make_var(tickers[0], lags)
+    for i in tickers[1:]:
+        X_, y_ = make_var(i, lags)
+        X = mo.append(X, X_)
+        y = mo.append(y, y_)
+    
+    print(X.shape, y.shape)
+    res = sm.OLS(y, sm.tools.add_constant(X)).fit()
+    print(res.summary())
+        
+    
 if __name__ == '__main__':  
+
+    #prep data
     min_date = datetime.date(2014, 1, 1)
     max_date = datetime.date(2015, 8, 23)
     url = 'data_for_financial_sentiment_paper.zip'
-    
-    
+
     ts = Tseries(date_range(min_date, max_date))
     
     #trading days first so we can exclude non trading days 
@@ -268,31 +323,19 @@ if __name__ == '__main__':
     ts.dummy_vars(lambda x: x.month==1, 'january')
     
     ts.make_return_matrix()
-            
-    X = ts.matrix_selector(['price_AAPL', 'webAll_AAPL', 'NWD', 'friday'])
-    y = ts.matrix_selector(['price_AAPL'])
     
-    X = matrix_difference(X, 0)[:-1]
-    y = matrix_difference(y, 0)[1:]
+    # do regressions
+    all_tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]    
+    pannal_var(all_tickers, 5)
     
-    print(np.mean(X, 0))
     
-    print(X.shape, y.shape)
-    res = sm.OLS(y, X).fit()
-    
-    print(res.params, res.pvalues, res.rsquared_adj)
-    
+# regression accross all stocks
+# VAR per stock 
+
     
 """
 
-def zs(x): 
-    return (np.array(x)-np.mean(x))/np.std(x)
 
-def pprintres(res):
-    for n, i in enumerate(res.params):
-        print n, i, res.pvalues[n]
-    print res.rsquared_adj
-            
 def get_crsp_data():
     with open('../Downloads/CRSP value-eighted index return.xlsx - WRDS.csv', 'rb') as inp:
         data = {}
@@ -334,14 +377,6 @@ def var(x, y, tau, january, friday=None, single=False):
         print list(res.pvalues)
         print res.rsquared_adj
     return [y, X, mu, sig]
-
-
-def daterange(start, finish, d, tag):
-    while start <= finish:
-        if start in d: d[start][tag] = 1.
-        else: d[start] = { tag: 1. }
-        start = start+datetime.timedelta(1)
-    return d
 
 
 def rolling_reg(x, y, tau, dts):
