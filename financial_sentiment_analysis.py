@@ -89,22 +89,6 @@ class Tseries:
             else:
                 self.tseries[dte][name] = 0
     
-    def make_return_matrix(self):
-        """
-        Generates a dts x cols matrix and associated labels
-        """
-    
-        dts = sorted(self.tseries.keys())
-        cols = self.descriptives[2]
-        
-        matrix = np.zeros((len(dts), len(cols)))
-        for n, dte in enumerate(dts):
-            for k, col in enumerate(cols):
-                matrix[n][k] = self.tseries[dte][col]
-        
-        self.matrix = matrix
-        self.dates = dts
-        self.labels = list(cols)
     
     def remove_null(self):
         ts = {}
@@ -119,17 +103,39 @@ class Tseries:
             for c in cols:
                 if c not in self.tseries[dte]:
                     self.tseries[dte][c] = 0
+
+    def select(self, ticker):
+        ts = sorted([(k, i[ticker]) for k, i in self.tseries.items()])
+        dts, vals = zip(*ts)
+        return dts, vals
+
+    # DONT LIKE THIS API 
+    # def make_return_matrix(self):
     
-    def matrix_selector(self, label_selection):
-        selection = []
-        for i in label_selection:
-            for n, col in enumerate(self.labels):
-                if col == i:
-                    selection.append(self.matrix.T[n])
+        # dts = sorted(self.tseries.keys())
+        # cols = self.descriptives[2]
         
-        selection = np.array(selection).T
-        return selection 
-                
+        # matrix = np.zeros((len(dts), len(cols)))
+        # for n, dte in enumerate(dts):
+            # for k, col in enumerate(cols):
+                # matrix[n][k] = self.tseries[dte][col]
+        
+        # self.matrix = matrix
+        # self.dates = dts
+        # self.labels = list(cols)
+                    
+    # def matrix_selector(self, label_selection):
+        # selection = []
+        # for i in label_selection:
+            # for n, col in enumerate(self.labels):
+                # if col == i:
+                    # selection.append(self.matrix.T[n])
+        
+        # selection = np.array(selection).T
+        # return selection 
+    
+
+    
 class LMNDataReader:
     
     def __init__(self, url):
@@ -242,6 +248,24 @@ class StockPriceDataFeeder:
                 for n, ticker in enumerate(tickers):
                     yield dte, "{}_{}".format(k, ticker), float(line[n+1])                    
 
+class CRSPDataFeeder:
+    def __init__(self, url):
+        self.url = url
+    
+    def _date_converter(self, x):
+        return datetime.date(int(x[:4]), int(x[4:6]), int(x[6:]))
+    
+    def crsp_data(self):
+        zf = zipfile.ZipFile(self.url)
+        fcontent = zf.open('CRSP value-eighted index return.xlsx - WRDS.csv').readlines()
+        for line in fcontent:   
+            try:
+                line = line[:-2].decode("utf-8").split(',')
+                yield self._date_converter(line[0]), 'CRSP', float(line[1])
+            except Exception as E:
+                print(repr(E))
+
+'''            
 class MatrixOperations:
     def zscore(self, X):
         mu = np.mean(X, 0)
@@ -251,7 +275,7 @@ class MatrixOperations:
         
     def diff(self, X, n):
         X = X.T
-        X[n] = np.append(0, np.diff(X[n]))
+        X[n] = np.append(0, np.diff(np.log(X[n])))
         X = X.T
         return X 
 
@@ -305,7 +329,7 @@ def pannal_var(tickers, lags):
     print(X.shape, y.shape)
     res = sm.OLS(y, sm.tools.add_constant(X)).fit()
     print(res.summary())
-        
+'''        
     
 if __name__ == '__main__':  
 
@@ -313,7 +337,7 @@ if __name__ == '__main__':
     min_date = datetime.date(2014, 1, 1)
     max_date = datetime.date(2015, 8, 23)
     url = 'data_for_financial_sentiment_paper.zip'
-
+    
     ts = Tseries(date_range(min_date, max_date))
     
     #trading days first so we can exclude non trading days 
@@ -322,36 +346,16 @@ if __name__ == '__main__':
     
     ts.add(LMNDataReader(url).nt_data())
     ts.add(FFDataReader(url).FF_data())
+    ts.add(CRSPDataFeeder(url).crsp_data())
      
     ts.remove_null()
     ts.pad_missing()       
     ts.dummy_vars(lambda x: x.weekday()==0, 'NWD')
     ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
     ts.dummy_vars(lambda x: x.month==1, 'january')
-    ts.make_return_matrix()
+
     
-    all_tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]
-    for ticker in all_tickers:
-        x = ts.matrix_selector(['lexisnexis_{}'.format(ticker)])
-        y = ts.matrix_selector(['price_{}'.format(ticker)])
-        y = np.diff(y.T[0]).T
-        x = x.T[0][1:].T
-        print(ticker)
-        
-        print(sm.OLS(y, sm.tools.add_constant(x)).fit().summary())
-        
-        fig = figure()
-        axs = [fig.add_subplot(311), fig.add_subplot(312),fig.add_subplot(313)]
-        axs[0].plot(x)
-        axs[1].plot(y)
-        axs[2].scatter(x, y)
-        show()
-        
-    
-    
-    # do regressions
-    #    
-    #pannal_var(['AAPL'], 5)
+    print(ts.select('price_AAPL'))
     
     
 # regression accross all stocks
