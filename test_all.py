@@ -9,16 +9,17 @@ def test_matrix_append():
     Y = np.zeros((5, 10))
     new = matrix_append(X, Y)
     assert new.shape == (9, 10) and sum(sum(new)) == 40
+
     
 def test_lagger():
     x = range(10)
     Xt = lagger(x, 5, keep0=True)
     Xf = lagger(x, 5, keep0=False)
     
-    test_arr = np.array([9, 8, 7, 6, 5, 4])
+    test_arr = np.array([1, 2, 3, 4, 5])
+    assert Xt.shape == (6, 10) and sum(Xt.T[0]-np.append(0, test_arr)) == 0 
+    assert Xf.shape == (5, 10) and sum(Xf.T[0]-test_arr) == 0 
 
-    assert Xt.shape == (6, 10) and sum(Xt.T[-1]-test_arr) == 0 
-    assert Xf.shape == (5, 10) and sum(Xf.T[-1]-test_arr[1:]) == 0 
 
 def test_LMNDataReader():
     dr = LMNDataReader('data_for_financial_sentiment_paper.zip')

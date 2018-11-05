@@ -1,20 +1,25 @@
 
+"""
+Excluding PFE because there is an anomally in the data 
+need to replicate origional results 
+
+
+'"""
+
 from pylab import figure, show
 import numpy as np
 import datetime
 import statsmodels.api as sm
 import zipfile
 
-"""
 FILELIST = {
     'web1': ['websites_AAPL_IBM_MSFT_IBM.csv','websites_everything_else.csv'],
     'web2': ['just_social_media_AAPL_IBM_MSFT_VZ.csv','just_social_media_everything_else.csv'],
     'lexisnexis': ['everything_else.csv - results-20160926-191305.csv.csv','AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv'],
     'webAll': ['SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv','SOCIALeverything_else.csv - results-20160927-183703.csv.csv']
     }
-"""
 
-FILELIST = {
+FILELIST2 = {
     'web': 'web',
     'web1': 'web1',
     'web2': 'web2',
@@ -103,16 +108,75 @@ class Tseries:
             for c in cols:
                 if c not in self.tseries[dte]:
                     self.tseries[dte][c] = 0
-
+    
+    def remove_missing(self):
+        new_tseries = {}
+        cols = self.descriptives[2]
+        for dte in self.tseries:
+            marker = True
+            for c in cols:
+                if c not in self.tseries[dte]:
+                    marker = False
+            if marker:
+                new_tseries[dte] = self.tseries[dte]
+        
+        self.tseries = new_tseries
+                    
+                    
     def select(self, ticker):
         ts = sorted([(k, i[ticker]) for k, i in self.tseries.items()])
         dts, vals = zip(*ts)
         return np.array(dts), np.array(vals)
 
     
-
-    
 class LMNDataReader:
+    
+    def __init__(self, url):
+        self.url = url
+    
+    def _date_converter(self, x):
+        x = x.split()[0]
+        
+        if '-' in x:
+            x = list(map(int, x.split('-')))
+            x = datetime.date(x[0], x[1], x[2])
+        elif '/' in x:
+            x = list(map(int, x.split('/')))
+            x = datetime.date(x[2], x[0], x[1])
+        else:
+            print('error trying to parse date: {}'.format(x))
+        
+        return x
+    
+    def _nt_converter(self, x):
+        try:
+            x = float(x)
+        except:
+            print('error trying to parse nt: {}'.format(x))
+        
+        return x
+        
+    def nt_data(self):
+        """
+        get data into a dict like
+            data[source content][ticker] = [date, LMN words]
+        """
+            
+        data = {}
+        zf = zipfile.ZipFile(self.url)
+        for k, fnames in FILELIST.items():
+            for fname in fnames:
+                data[k] = {}
+                fcontent = zf.open(fname).readlines()
+                for line in fcontent[1:]:
+                    line = line.decode("utf-8")[:-1].split(',')
+
+                    dte = self._date_converter(line[1])
+                    nt = self._nt_converter(line[-1])
+                    yield dte, "{}_{}".format(k, line[0]), nt
+
+                
+class LMNDataReader2:
     
     def __init__(self, url):
         self.url = url
@@ -147,7 +211,7 @@ class LMNDataReader:
             
         data = {}
         zf = zipfile.ZipFile(self.url)
-        for k, fname in FILELIST.items():
+        for k, fname in FILELIST2.items():
             data[k] = {}
             fcontent = zf.open(fname).readlines()
             for line in fcontent[1:]:
@@ -246,12 +310,12 @@ def lagger(x, lags, keep0=False):
         X = np.zeros((lags+1, len(x)))
         X[0] = x
         for i in range(1, lags+1):
-            X[i][i:] = x[:-i]
+            X[i][:-i] = x[i:]
         
     elif keep0 is False:
         X = np.zeros((lags, len(x)))
         for i in range(1, lags+1):
-            X[i-1][i:] = x[:-i]
+            X[i-1][:-i] = x[i:]
         
     return X   
 
@@ -274,22 +338,37 @@ def make_var(ticker, corpus):
     crsp = ts.select('CRSP')[1][1:]
     returns = np.diff(np.log(price))
     adj_returns = zscore(returns-crsp)    
-    sent = zscore(ts.select('{}_{}'.format(corpus, ticker))[1][1:])
-    nwd = np.array([ts.select('NWD')[1][1:]])
+    nt = ts.select('{}_{}'.format(corpus, ticker))[1][1:]        
+    sent = zscore(nt)
     friday = np.array([ts.select('friday')[1][1:]])
     jan = np.array([ts.select('january')[1][1:]])
     
-    Xreturns = lagger(returns, 5, keep0=False)
+    Xreturns = lagger(adj_returns, 5, keep0=False)
     Xsent = lagger(sent, 5, keep0=False)
+
+    if 1 == 0:
+        fig = figure()
+        axs = [fig.add_subplot(3,1,i) for i in range(1,4)]
+        axs[0].scatter(adj_returns, nt)
+        axs[1].plot(adj_returns)
+        axs[2].plot(nt)
+        print(sm.OLS(nt, adj_returns).fit().summary())
+        print(ticker)
+        print(len([i for i in nt if i==0]))
+        show()
+    
     
     X = jan
-    for i in [friday, nwd, Xsent, Xreturns]:
+    for i in [friday, Xsent, Xreturns]:
         X = matrix_append(X, i)
     
+    print(X.shape, adj_returns.shape)
     return X, adj_returns
     
 def pannal_var():
     tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]
+    # deliberately excluding PFE 
+    tickers = [i for i in tickers if i != 'PFE']
     for corpus in ['lexisnexis', 'web1', 'web2', 'web']:
         X, y = make_var(tickers[0], corpus)
         X = X.T
@@ -297,7 +376,7 @@ def pannal_var():
             X_, y_ = make_var(tickers[i], corpus)
             X = matrix_append(X, X_.T)
             y = np.append(y, y_)
-            
+        
         print(sm.OLS(y, sm.tools.add_constant(X)).fit().summary())
         print(corpus)    
 
@@ -327,19 +406,22 @@ if __name__ == '__main__':
     ts.add(StockPriceDataFeeder(url).sp_data())
     ts.remove_null()
     
-    ts.add(LMNDataReader(url).nt_data())
+    ts.add(LMNDataReader2(url).nt_data())
     ts.add(FFDataReader(url).FF_data())
     ts.add(CRSPDataFeeder(url).crsp_data())
      
     ts.remove_null()
-    ts.pad_missing()       
+    print(ts.descriptives)
+    ts.pad_missing()
+    #ts.remove_missing()
+    print(ts.descriptives)
     ts.dummy_vars(lambda x: x.weekday()==0, 'NWD')
     ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
     ts.dummy_vars(lambda x: x.month==1, 'january')
 
     # do analysis 
-    #pannal_var()
-    rolling_var()   
+    pannal_var()
+    #rolling_var()   
         
     """
 
