@@ -107,32 +107,8 @@ class Tseries:
     def select(self, ticker):
         ts = sorted([(k, i[ticker]) for k, i in self.tseries.items()])
         dts, vals = zip(*ts)
-        return dts, vals
+        return np.array(dts), np.array(vals)
 
-    # DONT LIKE THIS API 
-    # def make_return_matrix(self):
-    
-        # dts = sorted(self.tseries.keys())
-        # cols = self.descriptives[2]
-        
-        # matrix = np.zeros((len(dts), len(cols)))
-        # for n, dte in enumerate(dts):
-            # for k, col in enumerate(cols):
-                # matrix[n][k] = self.tseries[dte][col]
-        
-        # self.matrix = matrix
-        # self.dates = dts
-        # self.labels = list(cols)
-                    
-    # def matrix_selector(self, label_selection):
-        # selection = []
-        # for i in label_selection:
-            # for n, col in enumerate(self.labels):
-                # if col == i:
-                    # selection.append(self.matrix.T[n])
-        
-        # selection = np.array(selection).T
-        # return selection 
     
 
     
@@ -265,72 +241,79 @@ class CRSPDataFeeder:
             except Exception as E:
                 print(repr(E))
 
-'''            
-class MatrixOperations:
-    def zscore(self, X):
-        mu = np.mean(X, 0)
-        sig = np.std(X, 0)
-        X = (X-mu)/sig
-        return X
+def lagger(x, lags, keep0=False):
+    if keep0 is True:
+        X = np.zeros((lags+1, len(x)))
+        X[0] = x
+        for i in range(1, lags+1):
+            X[i][i:] = x[:-i]
         
-    def diff(self, X, n):
-        X = X.T
-        X[n] = np.append(0, np.diff(np.log(X[n])))
-        X = X.T
-        return X 
-
-    def var(self, X, n, lags):
+    elif keep0 is False:
+        X = np.zeros((lags, len(x)))
+        for i in range(1, lags+1):
+            X[i-1][i:] = x[:-i]
         
+    return X   
+
+def matrix_append(X, Y):
+    """
+    assumes 2 matrices NxM where Xm=Ym and you are appending over the N
+    axis  
+    """
+    new = np.zeros((X.shape[0]+Y.shape[0], X.shape[1]))
+    new[:X.shape[0]] = X
+    new[X.shape[0]:] = Y
+    return new
+
+def zscore(x):
+    x = (x-np.mean(x))/np.std(x)
+    return x
+
+def make_var(ticker, corpus):
+    price = ts.select('price_{}'.format(ticker))[1]
+    crsp = ts.select('CRSP')[1][1:]
+    returns = np.diff(np.log(price))
+    adj_returns = zscore(returns-crsp)    
+    sent = zscore(ts.select('{}_{}'.format(corpus, ticker))[1][1:])
+    nwd = np.array([ts.select('NWD')[1][1:]])
+    friday = np.array([ts.select('friday')[1][1:]])
+    jan = np.array([ts.select('january')[1][1:]])
+    
+    Xreturns = lagger(returns, 5, keep0=False)
+    Xsent = lagger(sent, 5, keep0=False)
+    
+    X = jan
+    for i in [friday, nwd, Xsent, Xreturns]:
+        X = matrix_append(X, i)
+    
+    return X, adj_returns
+    
+def pannal_var():
+    tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]
+    for corpus in ['lexisnexis', 'web1', 'web2', 'web']:
+        X, y = make_var(tickers[0], corpus)
         X = X.T
-        X_ = np.zeros((X.shape[0]+len(lags), X.shape[1]))
-        X_[:X.shape[0]] = X
-        c = X.shape[0]
-        for lag in lags:
-            laggedX = X[n]
-            laggedX = laggedX[:-lag]
-            laggedX = np.append(np.zeros(lag), laggedX)
-            X_[c] = laggedX
-            c += 1
-        X = X_.T
-        return X
-        
-    def append(self, X1, X2):
-        X = np.zeros((X1.shape[0]+X2.shape[0], X1.shape[1]))
-        X[:X1.shape[0]] = X1
-        X[X1.shape[0]:] = X2
-        return X
+        for i in range(1, len(tickers)):
+            X_, y_ = make_var(tickers[i], corpus)
+            X = matrix_append(X, X_.T)
+            y = np.append(y, y_)
+            
+        print(sm.OLS(y, sm.tools.add_constant(X)).fit().summary())
+        print(corpus)    
 
-def make_var(ticker, lags):
-    mo = MatrixOperations()
-    X = ts.matrix_selector(['price_{}'.format(ticker),
-                                'lexisnexis_{}'.format(ticker)
-                                ])
-    y = ts.matrix_selector(['price_{}'.format(ticker)])
-    
-    X = mo.diff(X, 0)[:-1]
-    y = mo.diff(y, 0)[1:]
-    X = mo.var(X, 1, range(1, lags))
-    X = mo.var(X, 0, range(1, lags))
-    # remove 'padded' var valuess
-    X = X[lags:]
-    y = y[lags:]
-    X = mo.zscore(X)
-    y = mo.zscore(y)
-    return X, y
-
-def pannal_var(tickers, lags):
-    mo = MatrixOperations()
-    X, y = make_var(tickers[0], lags)
-    for i in tickers[1:]:
-        X_, y_ = make_var(i, lags)
-        X = mo.append(X, X_)
-        y = mo.append(y, y_)
-    
-    print(X.shape, y.shape)
-    res = sm.OLS(y, sm.tools.add_constant(X)).fit()
-    print(res.summary())
-'''        
-    
+def rolling_var():
+    tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]
+    for corpus in ['lexisnexis', 'web1', 'web2', 'web']:
+        for ticker in tickers:
+            X, y = make_var(ticker, corpus)
+            for i in range(100, X.shape[1]):
+                X_ = X[:,i-100:i]
+                y_ = y[i-100:i]
+                res = sm.OLS(y_, X_.T).fit()
+                print(res.params, res.pvalues)
+                
+                
+                
 if __name__ == '__main__':  
 
     #prep data
@@ -354,19 +337,16 @@ if __name__ == '__main__':
     ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
     ts.dummy_vars(lambda x: x.month==1, 'january')
 
-    
-    print(ts.select('price_AAPL'))
-    
-    
-# regression accross all stocks
-# VAR per stock 
-
-    
-"""
+    # do analysis 
+    #pannal_var()
+    rolling_var()   
+        
+    """
 
 
 def get_crsp_data():
-    with open('../Downloads/CRSP value-eighted index return.xlsx - WRDS.csv', 'rb') as inp:
+    with open('..
+    /Downloads/CRSP value-eighted index return.xlsx - WRDS.csv', 'rb') as inp:
         data = {}
         for line in csv.reader(inp):
             try:
