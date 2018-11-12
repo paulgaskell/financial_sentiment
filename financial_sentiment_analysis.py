@@ -2,23 +2,63 @@
 """
 Excluding PFE because there is an anomally in the data 
 need to replicate origional results 
-
-
-'"""
+    - there appears to be an issue with LMNDataReader2 focus on the origional
+        for now
+    - **use returns not adj returns in the origional
+    - the word counts between the 2 LMNDataReaders are completely different 
+        this appears to be a fault with the data 
+        
+        NEED TO REPLICATE IN BIGQUERY 
+        - tried with lexisnexis gt3 mentions and is quite different 
+        - so are the results with raw_data 
+        - also the BA result is lower max suggesting it isnt caused by 
+            filtering 
+        - AAPL max is way higher 
+        - *the new deduped and stop word filtered sets appear to be working* 
+        
+        - need to get a handle, can w confirm avg messages and total words for 
+            one dataset and then work from there?
+            last query is closest to repolicating descriptives, need to confirm
+            with total words 
+            
+    STATSMODELS RESULTS are in the intuative order reading left to right on 
+        the columns of the endog matrix 
+        
+    - its interesting the deduped data works and the undeduped data does not 
+    
+    - next steps
+        - replicate all results
+        - check methodology against paper and write docstrings detailing 
+            implementation details in line with this work 
+            
+        - need to change logging to be more graceful when set dynamically 
+"""
 
 from pylab import figure, show
 import numpy as np
 import datetime
 import statsmodels.api as sm
 import zipfile
+import logging
+import sys 
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('__main__')
 
 FILELIST = {
     'web1': ['websites_AAPL_IBM_MSFT_IBM.csv','websites_everything_else.csv'],
     'web2': ['just_social_media_AAPL_IBM_MSFT_VZ.csv','just_social_media_everything_else.csv'],
     'lexisnexis': ['everything_else.csv - results-20160926-191305.csv.csv','AAPL_MSFT_VZ_AAPL.csv - results-20160926-190556.csv.csv'],
-    'webAll': ['SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv','SOCIALeverything_else.csv - results-20160927-183703.csv.csv']
+    'web': ['SOCIAL_AAPL_IBM_MSFT_VZ.csv - results-20160927-183311.csv.csv','SOCIALeverything_else.csv - results-20160927-183703.csv.csv']
     }
 
+FILELIST3 = {
+    'lexisnexis': 'lexisnexis_word_counts_deduped.csv',
+    'web': 'web_word_counts_deduped.csv',
+    'web1': 'web1_word_counts_deduped.csv',
+    'web2': 'web2_word_counts_deduped.csv'
+    }
+    
 FILELIST2 = {
     'web': 'web',
     'web1': 'web1',
@@ -73,6 +113,12 @@ class Tseries:
                 x[1] = T
                 
         return x, len(self.tseries), names
+    
+    @property
+    def tickers(self):
+        tickers = [i.split('_')[1] for i in self.descriptives[2] 
+                    if 'price' in i]
+        return tickers 
     
     @property 
     def last_vals(self):
@@ -144,7 +190,7 @@ class LMNDataReader:
             x = list(map(int, x.split('/')))
             x = datetime.date(x[2], x[0], x[1])
         else:
-            print('error trying to parse date: {}'.format(x))
+            logger.warn('error trying to parse date: {}'.format(x))
         
         return x
     
@@ -152,7 +198,7 @@ class LMNDataReader:
         try:
             x = float(x)
         except:
-            print('error trying to parse nt: {}'.format(x))
+            logger.warn('error trying to parse nt: {}'.format(x))
         
         return x
         
@@ -170,12 +216,13 @@ class LMNDataReader:
                 fcontent = zf.open(fname).readlines()
                 for line in fcontent[1:]:
                     line = line.decode("utf-8")[:-1].split(',')
+                    
 
                     dte = self._date_converter(line[1])
                     nt = self._nt_converter(line[-1])
+                    
                     yield dte, "{}_{}".format(k, line[0]), nt
-
-                
+               
 class LMNDataReader2:
     
     def __init__(self, url):
@@ -191,15 +238,17 @@ class LMNDataReader2:
             x = list(map(int, x.split('/')))
             x = datetime.date(x[2], x[0], x[1])
         else:
-            print('error trying to parse date: {}'.format(x))
+            logger.warn('error trying to parse date: {}'.format(x))
         
         return x
     
     def _nt_converter(self, T, x):
+        
         try:
-            x = 100*(float(x)/float(T))
+            #x = 100*(float(x)/float(T))
+            x = float(x)
         except:
-            print('error trying to parse nt: {}'.format(x))
+            logger.warnv('error trying to parse nt: {}'.format(x))
         
         return x
         
@@ -216,13 +265,54 @@ class LMNDataReader2:
             fcontent = zf.open(fname).readlines()
             for line in fcontent[1:]:
                 line = line.decode("utf-8")[:-1].split(',')
-
                 dte = self._date_converter(line[1])
                 nt = self._nt_converter(line[2], line[3])
                 yield dte, "{}_{}".format(k, line[0]), nt
-                
 
-                 
+class LMNDataReader3:
+    
+    def __init__(self, url):
+        self.url = url
+    
+    def _date_converter(self, x):
+        x = x.split()[0]
+        if '-' in x:
+            x = list(map(int, x.split('-')))
+            x = datetime.date(x[0], x[1], x[2])
+        else:
+            logger.warn('error trying to parse date: {}'.format(x))
+        
+        return x
+    
+    def _nt_converter(self, x):
+        try:
+            x = float(x[2])/float(x[3])
+        except:
+            logger.warn('error trying to parse nt: {}'.format(x))
+        
+        return x
+        
+    def nt_data(self):
+        """
+        get data into a dict like
+            data[source content][ticker] = [date, LMN words]
+        """
+            
+        data = {}
+        zf = zipfile.ZipFile(self.url)
+        for k, fname in FILELIST3.items():
+            data[k] = {}
+            fcontent = zf.open(fname).readlines()
+            for line in fcontent[1:]:
+                line = line.decode("utf-8")[:-1].split(',')
+                
+            
+                dte = self._date_converter(line[1])
+                nt = self._nt_converter(line)
+                
+                yield dte, "{}_{}".format(k, line[0]), nt
+
+                
 class FFDataReader:
     
     def __init__(self, url):    
@@ -232,7 +322,7 @@ class FFDataReader:
         try: 
             x = datetime.date(int(x[:4]), int(x[4:6]), int(x[6:]))
         except Exception as E:
-            print(repr(E))
+            logger.warnvv(repr(E))
         
         return x
         
@@ -282,7 +372,7 @@ class StockPriceDataFeeder:
                 try:
                     dte = self._date_converter(line[0])
                 except Exception as E:
-                    print(repr(E))
+                    logger.warn(repr(E))
                     continue
                     
                 for n, ticker in enumerate(tickers):
@@ -304,7 +394,7 @@ class CRSPDataFeeder:
                 yield self._date_converter(line[0]), 'CRSP', float(line[1])
             except Exception as E:
                 print(repr(E))
-
+        
 def lagger(x, lags, keep0=False):
     if keep0 is True:
         X = np.zeros((lags+1, len(x)))
@@ -333,68 +423,157 @@ def zscore(x):
     x = (x-np.mean(x))/np.std(x)
     return x
 
-def make_var(ticker, corpus):
-    price = ts.select('price_{}'.format(ticker))[1]
-    crsp = ts.select('CRSP')[1][1:]
-    returns = np.diff(np.log(price))
-    adj_returns = zscore(returns-crsp)    
-    nt = ts.select('{}_{}'.format(corpus, ticker))[1][1:]        
-    sent = zscore(nt)
-    friday = np.array([ts.select('friday')[1][1:]])
-    jan = np.array([ts.select('january')[1][1:]])
-    
-    Xreturns = lagger(adj_returns, 5, keep0=False)
-    Xsent = lagger(sent, 5, keep0=False)
+class VARBundle:
+    def __init__(self, ts, ticker, corpus):
+        self.ticker = ticker
+        self.corpus = corpus
+        self.dts = ts.select('price_{}'.format(ticker))[0]
+        self.price = ts.select('price_{}'.format(ticker))[1]
+        self.crsp = ts.select('CRSP')[1][1:]
+        self.returns = np.diff(np.log(self.price))
+        self.adj_returns = zscore(self.returns-self.crsp)    
+        self.nt = ts.select('{}_{}'.format(corpus, ticker))[1][1:]  
+        self.sent = zscore(self.nt)
+        self.friday = np.array([ts.select('friday')[1][1:]])
+        self.jan = np.array([ts.select('january')[1][1:]])    
+        self.NWD = np.array([ts.select('NWD')[1][1:]])
+        
+def make_var(ts, ticker, corpus):
+    """In the JCF paper 
+        - returns are ajusted of dividends and splits?
+        - says CRSP is proxy for market but doesnt say if included 
+        - 5 mentions (I dont do this) (pg 155)
+        - negative tone is % of LMN words (pg 155)
 
-    if 1 == 0:
-        fig = figure()
-        axs = [fig.add_subplot(3,1,i) for i in range(1,4)]
-        axs[0].scatter(adj_returns, nt)
-        axs[1].plot(adj_returns)
-        axs[2].plot(nt)
-        print(sm.OLS(nt, adj_returns).fit().summary())
-        print(ticker)
-        print(len([i for i in nt if i==0]))
-        show()
+        - coeficients multiplied by 100 when displayed 
+        - added in the summ over the sent lags as this is included in 
+            table 4 and the rolling regs (this is my best guess as to 
+            how this was origionally implemented 
+    """
+
+    vb = VARBundle(ts, ticker, corpus)
+   
+    Xreturns = lagger(vb.returns, 5, keep0=False)
+    Xsent = lagger(vb.sent, 5, keep0=False)
+        
+    sum_1to5 = np.array([np.sum(Xsent, 0)])    
+    sum_2to5 = np.array([np.sum(Xsent[1:,:], 0)])
     
+    logger.info('dims of Xsent, sum_1to5, sum_2to5 : {} {} {}'.format(
+                    repr(Xsent.shape), repr(sum_1to5.shape), 
+                    repr(sum_2to5.shape)))
     
-    X = jan
-    for i in [friday, Xsent, Xreturns]:
+    X = vb.jan
+    for i in [vb.NWD, Xsent, sum_1to5, sum_2to5, Xreturns]:
         X = matrix_append(X, i)
     
-    print(X.shape, adj_returns.shape)
-    return X, adj_returns
+    return X, vb.returns, vb
     
-def pannal_var():
-    tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]
+def pannal_var(ts):
+    tickers = ts.tickers
     # deliberately excluding PFE 
     tickers = [i for i in tickers if i != 'PFE']
-    for corpus in ['lexisnexis', 'web1', 'web2', 'web']:
-        X, y = make_var(tickers[0], corpus)
+    for corpus in ['lexisnexis', 'web', 'web1', 'web2']:
+        X, y, vb = make_var(ts, tickers[0], corpus)
         X = X.T
         for i in range(1, len(tickers)):
-            X_, y_ = make_var(tickers[i], corpus)
+            X_, y_, vb = make_var(ts, tickers[i], corpus)
             X = matrix_append(X, X_.T)
             y = np.append(y, y_)
         
-        print(sm.OLS(y, sm.tools.add_constant(X)).fit().summary())
-        print(corpus)    
+        res = sm.OLS(y, sm.tools.add_constant(X)).fit()
+        logger.info(res.summary().as_text())
+        logger.info(corpus)
+        logger.info(repr(res.params))
+        
+def rolling_var(ts):
+    """in the JCF paper
+        - use a year rolling regression
+        - the first lag is significant and negative 
+        - the first lag is negative and the sum of lags 1-5 is significant 
+            and negative 
+        - the first lag is negative and the sum of lags 2-5 is significant 
+            and positive
+            
+        TODO: 
+            this needs splitting up
+    """
+    
+    def _pt_periods(res):
+        pt = { 'lag1': False, 'persistent': False, 'transient': False }
+        if res.pvalues[3] < 0.05 and res.params[3] < 0:
+            pt['lag1'] = True
+            if res.pvalues[8] < 0.05 and res.params[8] < 0:
+                pt['persistent'] = True
+            if res.pvalues[9] < 0.05 and res.params[9] > 0:
+                pt['transient'] = True
+        return pt
 
-def rolling_var():
-    tickers = [i.split('_')[1] for i in ts.descriptives[2] if 'price' in i]
+    tickers = ts.tickers
+    # deliberately exclude PFE
+    tickers = [i for i in tickers if i != 'PFE']
+    
+    results = {}
     for corpus in ['lexisnexis', 'web1', 'web2', 'web']:
-        for ticker in tickers:
-            X, y = make_var(ticker, corpus)
-            for i in range(100, X.shape[1]):
-                X_ = X[:,i-100:i]
-                y_ = y[i-100:i]
+        results[corpus] = {}
+        for ticker in tickers:            
+            X, y, vb = make_var(ts, ticker, corpus)
+            
+            results[corpus][ticker] = { 
+                'lag1_significant':  np.zeros(len(y)),
+                'persistent': np.zeros(len(y)),
+                'transient': np.zeros(len(y))
+                }
+            
+            for i in range(125, X.shape[1]):
+                X_ = X[:,i-125:i]
+                y_ = y[i-125:i]
                 res = sm.OLS(y_, X_.T).fit()
-                print(res.params, res.pvalues)
                 
+                pt = _pt_periods(res)
+                if pt['lag1']:
+                    results[corpus][ticker]['lag1_significant'][i-125:i] += 1
+                if pt['persistent']:
+                    results[corpus][ticker]['persistent'][i-125:i] += 1
+                if pt['transient']:
+                    results[corpus][ticker]['transient'][i-125:i] += 1
+                        
+    for corpus in results.keys():
+        for ticker in results['corpus'].keys():
+            fig = figure()
+            axs = [fig.add_subplot(3,1,i) for i in range(1,4)]
+            axs[0].plot(results[corpus][ticker]['lag1_significant'])
+            axs[1].plot(results[corpus][ticker]['persistent'])
+            axs[2].plot(results[corpus][ticker]['transient'])
+            show()
+            
+def descriptive_statistics(ts):
+    """
+    replicates the descriptive stats tab of the spreadsheet
+    """
+    tickers = sorted(ts.tickers)
+    for corpus in ['lexisnexis', 'web']:
+        for ticker in tickers:
+            vb = VARBundle(ts, ticker, corpus)
                 
-                
-if __name__ == '__main__':  
+            print(ticker, corpus, np.mean(vb.nt), np.median(vb.nt),  np.max(vb.nt), 
+                    len([i for i in vb.nt if i==0]), len(vb.nt))
 
+FACTORY = {
+    'pannal_var': pannal_var,
+    'rolling_var': rolling_var,
+    'descriptive_statistics': descriptive_statistics
+    }
+    
+if __name__ == '__main__':  
+    
+    # init logging based on user params 
+    function = FACTORY.get(sys.argv[1])
+    if function is None:
+        logger.error('cant find function : {}'.format(function))
+        
+    logger.info('running {}'.format(sys.argv[1]))
+    
     #prep data
     min_date = datetime.date(2014, 1, 1)
     max_date = datetime.date(2015, 8, 23)
@@ -406,23 +585,19 @@ if __name__ == '__main__':
     ts.add(StockPriceDataFeeder(url).sp_data())
     ts.remove_null()
     
-    ts.add(LMNDataReader2(url).nt_data())
+    ts.add(LMNDataReader3(url).nt_data())
     ts.add(FFDataReader(url).FF_data())
     ts.add(CRSPDataFeeder(url).crsp_data())
      
     ts.remove_null()
-    print(ts.descriptives)
     ts.pad_missing()
-    #ts.remove_missing()
-    print(ts.descriptives)
     ts.dummy_vars(lambda x: x.weekday()==0, 'NWD')
     ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
     ts.dummy_vars(lambda x: x.month==1, 'january')
 
-    # do analysis 
-    pannal_var()
-    #rolling_var()   
-        
+    # do analysis
+    function(ts)
+
     """
 
 
