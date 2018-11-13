@@ -34,7 +34,7 @@ need to replicate origional results
         - need to change logging to be more graceful when set dynamically 
 """
 
-from pylab import figure, show
+from pylab import figure, show, savefig
 import numpy as np
 import datetime
 import statsmodels.api as sm
@@ -44,6 +44,12 @@ import sys
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('__main__')
+
+ROLLING_VAR_PARAMS = { 
+    'JCF params': [250, 0.5, '../financial_sentiment_graphs/JCF_params/'],
+    'med': [250, 0.5, '../financial_sentiment_graphs/6months/'],
+    'short': [60, 0.5, '../financial_sentiment_graphs/3months/']
+    }
 
 FILELIST = {
     'web1': ['websites_AAPL_IBM_MSFT_IBM.csv','websites_everything_else.csv'],
@@ -131,7 +137,7 @@ class Tseries:
                     continue
                     
                 last_vals[c] = dte
-        return last_vals   
+        return last_vals 
     
     def dummy_vars(self, cond, name):
         for dte in self.tseries.keys():
@@ -459,7 +465,7 @@ def make_var(ts, ticker, corpus):
     sum_1to5 = np.array([np.sum(Xsent, 0)])    
     sum_2to5 = np.array([np.sum(Xsent[1:,:], 0)])
     
-    logger.info('dims of Xsent, sum_1to5, sum_2to5 : {} {} {}'.format(
+    logger.debug('dims of Xsent, sum_1to5, sum_2to5 : {} {} {}'.format(
                     repr(Xsent.shape), repr(sum_1to5.shape), 
                     repr(sum_2to5.shape)))
     
@@ -473,6 +479,7 @@ def pannal_var(ts):
     tickers = ts.tickers
     # deliberately excluding PFE 
     tickers = [i for i in tickers if i != 'PFE']
+    res_summary = []
     for corpus in ['lexisnexis', 'web', 'web1', 'web2']:
         X, y, vb = make_var(ts, tickers[0], corpus)
         X = X.T
@@ -482,9 +489,13 @@ def pannal_var(ts):
             y = np.append(y, y_)
         
         res = sm.OLS(y, sm.tools.add_constant(X)).fit()
+        res_summary.append('{}\n{}\n'.format(corpus, res.summary().as_text()))
+                        
         logger.info(res.summary().as_text())
         logger.info(corpus)
-        logger.info(repr(res.params))
+        
+    with open('pannal_var_results.txt', 'w') as out:
+        out.write('\n'.join(res_summary))
         
 def rolling_var(ts):
     """in the JCF paper
@@ -494,21 +505,42 @@ def rolling_var(ts):
             and negative 
         - the first lag is negative and the sum of lags 2-5 is significant 
             and positive
-            
+        
+        settings in the origional JCF paper 
+        - days = 250
+        - p = 0.05
+        
         TODO: 
             this needs splitting up
     """
     
+    days = 120
+    p = 0.05
+    path = '../financial_sentiment_graphs/'
+    
     def _pt_periods(res):
         pt = { 'lag1': False, 'persistent': False, 'transient': False }
-        if res.pvalues[3] < 0.05 and res.params[3] < 0:
+        if res.pvalues[3] < p and res.params[3] < 0:
             pt['lag1'] = True
-            if res.pvalues[8] < 0.05 and res.params[8] < 0:
+            if res.pvalues[8] < p and res.params[8] < 0:
                 pt['persistent'] = True
-            if res.pvalues[9] < 0.05 and res.params[9] > 0:
+            if res.pvalues[9] < p and res.params[9] > 0:
                 pt['transient'] = True
         return pt
 
+    def _rv_iterator():
+        tickers = ts.tickers
+        corpra = ['lexisnexis', 'web1', 'web2', 'web']
+        for name, (days, p, path) in ROLLING_VAR_PARAMS.items():
+            for corpus in corpra:
+                for ticker in tickers:
+                    yield name, days, p, path, corpus, ticker
+        
+    
+    
+       
+    sys.exit()
+        
     tickers = ts.tickers
     # deliberately exclude PFE
     tickers = [i for i in tickers if i != 'PFE']
@@ -525,28 +557,53 @@ def rolling_var(ts):
                 'transient': np.zeros(len(y))
                 }
             
-            for i in range(125, X.shape[1]):
-                X_ = X[:,i-125:i]
-                y_ = y[i-125:i]
+            for i in range(days, X.shape[1]):
+                X_ = X[:,i-days:i]
+                y_ = y[i-days:i]
                 res = sm.OLS(y_, X_.T).fit()
                 
                 pt = _pt_periods(res)
                 if pt['lag1']:
-                    results[corpus][ticker]['lag1_significant'][i-125:i] += 1
+                    results[corpus][ticker]['lag1_significant'][i-days:i] += 1
                 if pt['persistent']:
-                    results[corpus][ticker]['persistent'][i-125:i] += 1
+                    results[corpus][ticker]['persistent'][i-days:i] += 1
                 if pt['transient']:
-                    results[corpus][ticker]['transient'][i-125:i] += 1
-                        
+                    results[corpus][ticker]['transient'][i-days:i] += 1
+    
+    statistics = []
+    totals = {}
     for corpus in results.keys():
-        for ticker in results['corpus'].keys():
+        totals[corpus] = [0, 0, 0]
+        for ticker in results[corpus].keys():
+            r = results[corpus][ticker]
+            name = '{}-{}'.format(corpus, ticker)
+            
+            if sum(r['lag1_significant']) == 0:
+                logger.info('no significant result for {}'.format(name))
+                continue
+            
+            row = [name]
+            for n, i in enumerate(['lag1_significant', 'persistent', 
+                                    'transient']):
+                                    
+                significant_periods = sum([1 for j in r[i] if j > 0])
+                row.append(significant_periods)
+                totals[corpus][n] += significant_periods
+                
+            statistics.append(row)
+            
             fig = figure()
             axs = [fig.add_subplot(3,1,i) for i in range(1,4)]
-            axs[0].plot(results[corpus][ticker]['lag1_significant'])
-            axs[1].plot(results[corpus][ticker]['persistent'])
-            axs[2].plot(results[corpus][ticker]['transient'])
-            show()
-            
+            axs[0].plot(r['lag1_significant'])
+            axs[1].plot(r['persistent'])
+            axs[2].plot(r['transient'])
+            savefig('{}{}'.format(path, name))
+    
+    for i in statistics:
+        logger.info(i)
+    
+    logger.info(totals)
+    
 def descriptive_statistics(ts):
     """
     replicates the descriptive stats tab of the spreadsheet
@@ -556,8 +613,9 @@ def descriptive_statistics(ts):
         for ticker in tickers:
             vb = VARBundle(ts, ticker, corpus)
                 
-            print(ticker, corpus, np.mean(vb.nt), np.median(vb.nt),  np.max(vb.nt), 
-                    len([i for i in vb.nt if i==0]), len(vb.nt))
+            print(ticker, corpus, np.mean(vb.nt), np.median(vb.nt),  
+                    np.max(vb.nt), len([i for i in vb.nt if i==0]), 
+                    len(vb.nt), vb.dts[0], vb.dts[-1])
 
 FACTORY = {
     'pannal_var': pannal_var,
@@ -594,7 +652,7 @@ if __name__ == '__main__':
     ts.dummy_vars(lambda x: x.weekday()==0, 'NWD')
     ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
     ts.dummy_vars(lambda x: x.month==1, 'january')
-
+    
     # do analysis
     function(ts)
 
