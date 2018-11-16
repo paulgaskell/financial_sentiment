@@ -446,7 +446,32 @@ class VARBundle:
         self.friday = np.array([ts.select('friday')[1][1:]])
         self.jan = np.array([ts.select('january')[1][1:]])    
         self.NWD = np.array([ts.select('NWD')[1][1:]])
-  
+
+class FFFactors:
+    """Create a np matrix of ff factors where 
+        self.factors -> NxM matrix where N is the number of factors and M is
+            the length of the time series under study 
+            factors are ordered by enumeration corresponding to the order they
+            are provided by Fama and French on their website 
+    """
+    
+    def __init__(self, model):
+        series_names = sorted([i for i in ts.descriptives[2] if model in i])
+        logger.info(series_names)
+        dts, root_factor = ts.select(series_names[0])
+        grouped_factors = np.array([root_factor])
+        
+        for name in series_names[1:]:
+            factor = np.array([ts.select(name)[1]])
+            grouped_factors = matrix_append(grouped_factors, factor)
+        
+        grouped_factors = grouped_factors[:,1:]
+        dts = dts[1:]
+        logger.info(grouped_factors.shape)
+        
+        self.dts = dts
+        self.factors = grouped_factors
+            
 def make_var(ts, ticker, corpus):
     """In the JCF paper 
         - returns are ajusted of dividends and splits?
@@ -628,7 +653,12 @@ def portfolio_analysis(ts):
             - doenst state explicitly so have to assume adj_returns unless 
                 there is some convention I am not aware of 
         - what is the exact trading strat?
-            - long/short top half / bottom half portfolios. Hold for 10 days or 250 days 
+            - long/short top half / bottom half portfolios. Hold for 10 days 
+                or 250 days 
+                
+        TODO:
+            need to refactor, this should be a class (so probably should the 
+            other bits of analysis
     """
     
     def _get_series(ticker, corpus):
@@ -663,29 +693,43 @@ def portfolio_analysis(ts):
                     lownt = np.mean(holding_period_ret[order][:10])
                     highnt = np.mean(holding_period_ret[order][10:])
                     res[k].append((lownt-highnt)/2)
-            
-        return res        
+        
+        res = { k: np.array(i) for k, i in res.items() }
+        return res             
     
-    def _ff_regressions():
-        model = '3 factor'
-        series = [i for i in ts.descriptives[2] if model in i]
-        factors = [np.array([ts.select(i)]) for i in series]
-        print(factors)
-        
-        
+    def _port_results_iter(port_returns):
+        for corpus in port_returns:
+            for holding_period in port_returns[corpus]:
+                r = port_returns[corpus][holding_period]
+                yield r, corpus, holding_period
     
     port_returns = { corpus: _get_port(corpus) for corpus in CORPRA }
     
-    _ff_regressions()
-    
     with open('portfolio_analysis_resutls.txt', 'w') as out:
-        for corpus in port_returns:
-            for i in port_returns[corpus]:
-                r = port_returns[corpus][i]
-                out.write('{}\n'.format(','.join(list(map(str, 
-                            [corpus, i, np.mean(r), len(r)]
-                            )))))
-            
+        for r, corpus, holding_period in _port_results_iter(port_returns):
+            out.write('{}\n'.format(','.join(list(map(str, 
+                        [corpus, holding_period, np.mean(r), len(r)]
+                        )))))
+    
+    with open('ff_regression_results.txt', 'w') as out:
+        for model in ['3 factor', '5 factor']:
+            ff = FFFactors(model)
+            for r, corpus, holding_period in _port_results_iter(port_returns):
+                logger.info('ff, y shapes = {} {}'.format(
+                            repr(r.shape), repr(ff.factors.shape)
+                            ))
+                            
+                X = ff.factors[:,:len(r)].T
+                
+                logger.info('X, y shapes = {} {}'.format(
+                            repr(r.shape), repr(X.shape)
+                            ))
+                
+                res = sm.OLS(r, X).fit()
+                out.write('{} - {}\n{}\n\n'.format(corpus, holding_period,
+                                res.summary().as_text()))
+                
+    
                       
 FACTORY = {
     'pannal_var': pannal_var,
