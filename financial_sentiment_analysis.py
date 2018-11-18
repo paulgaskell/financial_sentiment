@@ -339,6 +339,7 @@ class FFDataReader:
         """
         get data into a dict like
             data[ff model] = [date, factors...]
+            leave out the risk free rate as this is 0 throughout the study period 
         """
     
         zf = zipfile.ZipFile(self.url)
@@ -664,7 +665,7 @@ def portfolio_analysis(ts):
     def _get_series(ticker, corpus):
         vb = VARBundle(ts, ticker, corpus)
         sent = np.array([vb.sent])
-        ret = np.array([vb.adj_returns])                
+        ret = np.array([vb.returns])                
         return sent, ret, vb
     
     def _get_port(corpus):
@@ -705,7 +706,7 @@ def portfolio_analysis(ts):
     
     port_returns = { corpus: _get_port(corpus) for corpus in CORPRA }
     
-    with open('portfolio_analysis_resutls.txt', 'w') as out:
+    with open('portfolio_analysis_results.txt', 'w') as out:
         for r, corpus, holding_period in _port_results_iter(port_returns):
             out.write('{}\n'.format(','.join(list(map(str, 
                         [corpus, holding_period, np.mean(r), len(r)]
@@ -725,12 +726,10 @@ def portfolio_analysis(ts):
                             repr(r.shape), repr(X.shape)
                             ))
                 
-                res = sm.OLS(r, X).fit()
+                res = sm.OLS(r, sm.tools.add_constant(X)).fit()
                 out.write('{} - {}\n{}\n\n'.format(corpus, holding_period,
                                 res.summary().as_text()))
-                
-    
-                      
+                                     
 FACTORY = {
     'pannal_var': pannal_var,
     'rolling_var': rolling_var,
@@ -770,8 +769,6 @@ if __name__ == '__main__':
     
     # do analysis
     function(ts)
-
-
 
 
 
