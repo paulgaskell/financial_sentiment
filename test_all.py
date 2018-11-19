@@ -1,19 +1,9 @@
 
-from financial_sentiment_analysis import (LMNDataReader, Tseries, lagger, 
-                                            matrix_append, LMNDataReader2) 
+from data import LMNDataReader, Tseries, LMNDataReader2
+from utils import matrix_append
 import numpy as np
 import datetime 
 
-"""
-def test_LMN_consistncy():
-    url = 'data_for_financial_sentiment_paper.zip'
-    data = sorted([i for i in LMNDataReader(url).nt_data()])
-    data2 = sorted([i for i in LMNDataReader2(url).nt_data()])
-    print(data[-3:])
-    print(data2[-3:])
-    
-test_LMN_consistncy()
-"""
 
 def test_matrix_append():
     X = np.ones((4, 10))
@@ -21,7 +11,7 @@ def test_matrix_append():
     new = matrix_append(X, Y)
     assert new.shape == (9, 10) and sum(sum(new)) == 40
 
-    
+"""
 def test_lagger():
     x = range(10)
     Xt = lagger(x, 5, keep0=True)
@@ -30,16 +20,14 @@ def test_lagger():
     test_arr = np.array([1, 2, 3, 4, 5])
     assert Xt.shape == (6, 10) and sum(Xt.T[0]-np.append(0, test_arr)) == 0 
     assert Xf.shape == (5, 10) and sum(Xf.T[0]-test_arr) == 0 
-
+"""
 
 def test_LMNDataReader():
     dr = LMNDataReader('data_for_financial_sentiment_paper.zip')
     c = []
     for i in dr.nt_data():
-        if i[1] == 'lexisnexis_AAPL': c.append(i[2])
-        #assert type(i[0]) == datetime.date and type(i[1]) == str and type(i[2]) == float 
-    print np.mean(c), np.median(c), np.max(c)
-test_LMNDataReader()
+        assert type(i[0]) == datetime.date and type(i[1]) == str and type(i[2]) == float 
+
 
 def test_select():
     def _test_iter():
