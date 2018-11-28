@@ -1,5 +1,7 @@
 CORPRA = [ 'lexisnexis', 'web', 'web1', 'web2']
 
+FILTERS = [ 'gt0', 'gt1', 'gt2', 'gt3', 'gt5' ]
+
 ROLLING_VAR_PARAMS = { 
     'JCF params': [250, 0.05, '../financial_sentiment_graphs/JCF_params_'],
     'med': [120, 0.05, '../financial_sentiment_graphs/6months_'],
@@ -18,6 +20,13 @@ FILELIST3 = {
     'web': 'web_word_counts_deduped.csv',
     'web1': 'web1_word_counts_deduped.csv',
     'web2': 'web2_word_counts_deduped.csv'
+    }
+
+FILELIST4 = {
+    'lexisnexis': 'word_counts_lexisnexis_v2',
+    'web': 'word_counts_web_v2',
+    'web1': 'word_counts_web1_v2',
+    'web2': 'word_counts_web2_v2'
     }
     
 FILELIST2 = {

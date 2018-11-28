@@ -1,9 +1,17 @@
 
-from data import LMNDataReader, Tseries, LMNDataReader2
+from data import LMNDataReader, Tseries, LMNDataReader2, LMNDataReader4
 from utils import matrix_append
 import numpy as np
 import datetime 
 
+
+def test_LMNDataReader4():
+    dr = LMNDataReader4('data_for_financial_sentiment_paper.zip')
+    for i in dr.nt_data():
+        print(i)
+        
+test_LMNDataReader4()
+sys.exit()
 
 def test_matrix_append():
     X = np.ones((4, 10))

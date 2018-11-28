@@ -35,6 +35,12 @@ need to replicate origional results
         
     - I think the gt3 mentions makes a lot of difference for lexisnexis so we 
         need to reintroduce this for comparison 
+        
+        
+    TODO:
+        - need to get filtered reults from BigQuery - but we are on the way to 
+            doing that I think 
+        - how can we test the hypothesis that the issue is noise?
 """
 
 from pylab import figure, show, savefig
@@ -143,13 +149,19 @@ class VAR:
         return X, vb.returns, vb
 
 class PanelVAR:   
-
+    """Create panel regression with optional filtering
+        the idea behind the filtering is that are different potential noises 
+            - typical gaussian noise becasue the metrc is poor
+            - catestrophic faliure because we are counting bad messages
+        
+    """
+    
     @staticmethod
     def get(ts):
         tickers = ts.tickers
         # deliberately excluding PFE 
         tickers = [i for i in tickers if i != 'PFE']
-        res_summary = []
+        res_summary, filtered_res_summary = [], []
         for corpus in CORPRA:
             X, y, vb = VAR.get(ts, tickers[0], corpus)
             X = X.T
@@ -158,15 +170,29 @@ class PanelVAR:
                 X = matrix_append(X, X_.T)
                 y = np.append(y, y_)
             
+            filtered_X, filtered_y = [], []
+            for t in range(len(y)):
+                if .2 < abs(X[t][2]) < 2:
+                    filtered_X.append(X[t])
+                    filtered_y.append(y[t])
+            
             res = sm.OLS(y, sm.tools.add_constant(X)).fit()
-            res_summary.append('{}\n{}\n'.format(corpus, res.summary().as_text()))
-                            
-            logger.info(res.summary().as_text())
+            res_summary.append('{}\n{}\n'.format(corpus, 
+                                    res.summary().as_text()))
+            filtered_res = sm.OLS(filtered_y, sm.tools.add_constant(
+                                    filtered_X)).fit()
+            filtered_res_summary.append('{}\n{}\n'.format(
+                                    corpus, filtered_res.summary().as_text()))
+            
             logger.info(corpus)
+            logger.info(res.summary().as_text())
+            logger.info(filtered_res.summary().as_text())
             
         with open('panel_var_results.txt', 'w') as out:
             out.write('\n'.join(res_summary))
-                        
+            out.write('\n'.join(filtered_res_summary))
+             
+             
 class RollingVAR:
     """in the JCF paper
         - use a year rolling regression
@@ -312,9 +338,6 @@ class PortfolioAnalysis:
             - long/short top half / bottom half portfolios. Hold for 10 days 
                 or 250 days 
                 
-        TODO:
-            need to refactor, this should be a class (so probably should the 
-            other bits of analysis
     """
     
     @staticmethod
@@ -419,7 +442,7 @@ if __name__ == '__main__':
     ts.add(StockPriceDataFeeder(url).sp_data())
     ts.remove_null()
     
-    ts.add(LMNDataReader3(url).nt_data())
+    ts.add(LMNDataReader2(url).nt_data())
     ts.add(FFDataReader(url).FF_data())
     ts.add(CRSPDataFeeder(url).crsp_data())
      
