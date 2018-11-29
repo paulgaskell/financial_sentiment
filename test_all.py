@@ -1,16 +1,16 @@
 
-from data import LMNDataReader, Tseries, LMNDataReader2, LMNDataReader4
+from data import LMNDataReader, Tseries, LMNDataReader2, LMNDataReader5
 from utils import matrix_append
 import numpy as np
 import datetime 
 
 
-def test_LMNDataReader4():
-    dr = LMNDataReader4('data_for_financial_sentiment_paper.zip')
+def test_LMNDataReader5():
+    dr = LMNDataReader5('data_for_financial_sentiment_paper.zip')
     for i in dr.nt_data():
         print(i)
         
-test_LMNDataReader4()
+test_LMNDataReader5()
 sys.exit()
 
 def test_matrix_append():

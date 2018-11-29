@@ -11,7 +11,7 @@ import logging
 import numpy as np
 
 from config import (FILELIST, FILELIST2, FILELIST3, FFLIST, STOCKPRICELIST,
-                    FILELIST4, FILTERS)
+                    FILELIST4, FILELIST5, FILTERS, FILTERS_LONG)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('__main__')
@@ -270,10 +270,10 @@ class FFDataReader:
                     continue
                 
                 dte = self._ff_date_converter(line[0])
-                if k == '3 factor':
+                if k == '3-factor':
                     for n in range(1, 4):
                         yield dte, '{} f={}'.format(k, n), float(line[n])
-                elif k == '5 factor':
+                elif k == '5-factor':
                     for n in range(1, 6):
                         yield dte, '{} f={}'.format(k, n), float(line[n])
 
@@ -322,7 +322,7 @@ class CRSPDataFeeder:
                 print(repr(E))
 
 class LMNDataReader4:
-        
+
     def __init__(self, url):
         self.url = url
         self.names = FILTERS
@@ -367,4 +367,53 @@ class LMNDataReader4:
                 
                 for n, nt in enumerate(nts):
                     yield dte, "{}_{}_{}".format(k, line[0], self.names[n]), nt
+                    
+class LMNDataReader5:
+        
+    def __init__(self, url):
+        self.url = url
+        self.names = FILTERS_LONG
+    
+    def _date_converter(self, x):
+        if '-' in x:
+            x = x.split()[0]
+            x = list(map(int, x.split('-')))
+            x = datetime.date(x[0], x[1], x[2])
+        else:
+            logger.warning('error trying to parse date: {}'.format(x))
+        
+        return x
+    
+    def _nt_converter(self, x):
+        try:
+            nt = np.array(list(map(float, x[2:11])))
+            total = np.array(list(map(float, x[11:])))
+            x = nt/total
+            x = np.nan_to_num(x)
+        except:
+            logger.warning('error trying to parse nt: {}'.format(x))
+        
+        return x
+        
+    def nt_data(self):
+        """
+        get data into a dict like
+            data[source content][ticker] = [date, LMN words]
+        """
+            
+        data = {}
+        zf = zipfile.ZipFile(self.url)
+        for k, fname in FILELIST5.items():
+            data[k] = {}
+            fcontent = zf.open(fname).readlines()
+            for line in fcontent[1:]:
+            
+                line = line.decode("utf-8")[:-1].split(',')
+                                
+                dte = self._date_converter(line[1])
+                nts = self._nt_converter(line)
                 
+                for n, nt in enumerate(nts):
+                    yield dte, "{}_{}_{}".format(k, line[0], self.names[n]), nt   
+                    
+                 

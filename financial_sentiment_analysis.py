@@ -51,7 +51,7 @@ import zipfile
 import logging
 import sys 
 
-from data import (Tseries, LMNDataReader3, StockPriceDataFeeder, 
+from data import (Tseries, LMNDataReader4, StockPriceDataFeeder, 
                     FFDataReader, CRSPDataFeeder)
 from utils import date_range, zscore, matrix_append
 from config import CORPRA, ROLLING_VAR_PARAMS
@@ -61,7 +61,7 @@ logger = logging.getLogger('__main__')
         
 class VARBundle:
     
-    def __init__(self, ts, ticker, corpus):
+    def __init__(self, ts, ticker, corpus, mentions):
         self.ticker = ticker
         self.corpus = corpus
         self.dts = ts.select('price_{}'.format(ticker))[0]
@@ -69,7 +69,7 @@ class VARBundle:
         self.crsp = ts.select('CRSP')[1][1:]
         self.returns = np.diff(np.log(self.price))
         self.adj_returns = zscore(self.returns-self.crsp)    
-        self.nt = ts.select('{}_{}'.format(corpus, ticker))[1][1:]  
+        self.nt = ts.select('{}_{}_{}'.format(corpus, ticker, mentions))[1][1:]  
         self.sent = zscore(self.nt)
         self.friday = np.array([ts.select('friday')[1][1:]])
         self.jan = np.array([ts.select('january')[1][1:]])    
@@ -130,7 +130,7 @@ class VAR:
 
     @staticmethod
     def get(ts, ticker, corpus):
-        vb = VARBundle(ts, ticker, corpus)
+        vb = VARBundle(ts, ticker, corpus, mentions)
        
         Xreturns = VAR._lagger(vb.returns, 5, keep0=False)
         Xsent = VAR._lagger(vb.sent, 5, keep0=False)
@@ -442,7 +442,7 @@ if __name__ == '__main__':
     ts.add(StockPriceDataFeeder(url).sp_data())
     ts.remove_null()
     
-    ts.add(LMNDataReader2(url).nt_data())
+    ts.add(LMNDataReader4(url).nt_data())
     ts.add(FFDataReader(url).FF_data())
     ts.add(CRSPDataFeeder(url).crsp_data())
      
@@ -451,6 +451,8 @@ if __name__ == '__main__':
     ts.dummy_vars(lambda x: x.weekday()==0, 'NWD')
     ts.dummy_vars(lambda x: x.weekday()==4, 'friday')
     ts.dummy_vars(lambda x: x.month==1, 'january')
+    
+    print(ts.descriptives)
     
     # do analysis
     function(ts)

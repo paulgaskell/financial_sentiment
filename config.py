@@ -2,6 +2,8 @@ CORPRA = [ 'lexisnexis', 'web', 'web1', 'web2']
 
 FILTERS = [ 'gt0', 'gt1', 'gt2', 'gt3', 'gt5' ]
 
+FILTERS_LONG = [ '0', '1', '2', '3', '4', '5', '6', '7', '8' ]
+
 ROLLING_VAR_PARAMS = { 
     'JCF params': [250, 0.05, '../financial_sentiment_graphs/JCF_params_'],
     'med': [120, 0.05, '../financial_sentiment_graphs/6months_'],
@@ -22,6 +24,13 @@ FILELIST3 = {
     'web2': 'web2_word_counts_deduped.csv'
     }
 
+FILELIST5 = {
+    'lexisnexis': 'word_counts_lexisnexis_v3',
+    'web': 'word_counts_web_v3',
+    'web1': 'word_counts_web1_v3',
+    'web2': 'word_counts_web2_v3'
+    }
+    
 FILELIST4 = {
     'lexisnexis': 'word_counts_lexisnexis_v2',
     'web': 'word_counts_web_v2',
@@ -37,8 +46,8 @@ FILELIST2 = {
     }
 
 FFLIST = { 
-    '3 factor': 'F-F_Research_Data_Factors_daily.CSV',
-    '5 factor': 'F-F_Research_Data_5_Factors_2x3_daily.CSV'
+    '3-factor': 'F-F_Research_Data_Factors_daily.CSV',
+    '5-factor': 'F-F_Research_Data_5_Factors_2x3_daily.CSV'
     }
 
 STOCKPRICELIST = {
